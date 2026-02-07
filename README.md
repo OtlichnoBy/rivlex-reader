@@ -8,7 +8,7 @@
 
 ### 📺 Видеодемонстрация
 
-[video](docs/video.mp4)
+<video src="docs/video.mp4" width="100%" controls></video>
 
 ## Основной функционал
 
@@ -28,11 +28,11 @@
 
 <p align="center">
   <img src="docs/screenshot.jpg" width="400" alt="Главный экран">
-  <img src="docs/screenshot4.jpg" width="400" alt="Оглавление">
+  <img src="docs/screenshot4.jpg" width="400" alt="О программе и клавиши">
 </p>
 <p align="center">
-  <img src="docs/screenshot2.jpg" width="400" alt="Поиск по книге">
-  <img src="docs/screenshot3.jpg" width="400" alt="О программе и клавиши">
+  <img src="docs/screenshot2.jpg" width="400" alt="Оглавление">
+  <img src="docs/screenshot3.jpg" width="400" alt="Поиск по книге">
 </p>
 
 ## Горячие клавиши
