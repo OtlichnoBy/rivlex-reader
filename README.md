@@ -84,7 +84,7 @@
 
 1. Перейдите в раздел [Releases](https://github.com/OtlichnoBy/rivlex-reader/releases).
 2. Скачайте архив `RivlexReader-v1.0.0-Windows.zip`.
-3. Распакуйте в любую папку и запустите `RivlexReader.exe`.
+3. Распакуйте в любую папку и запустите `RivlexReader.vbs`.
 
 ### Linux (Ubuntu/Debian)
 
