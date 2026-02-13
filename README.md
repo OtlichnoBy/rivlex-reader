@@ -8,7 +8,7 @@
 
 ### 📺 Видеодемонстрация
 
-[video](docs/video.mp4)
+[video]([docs/video.mp4](https://github.com/user-attachments/assets/89c8dfd5-d132-4fae-9c05-80718dbf0101))
 
 ## Основной функционал
 
