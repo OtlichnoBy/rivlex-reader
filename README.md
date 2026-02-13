@@ -8,7 +8,10 @@
 
 ### 📺 Видеодемонстрация
 
-[video]([docs/video.mp4](https://github.com/user-attachments/assets/89c8dfd5-d132-4fae-9c05-80718dbf0101))
+<video controls width="100%">
+  <source src="docs/video.mp4" type="video/mp4">
+  Ваш браузер не поддерживает воспроизведение видео.
+</video>
 
 ## Основной функционал
 
