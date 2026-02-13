@@ -8,7 +8,7 @@
 
 ### 📺 Видеодемонстрация
 
-https://github.com/user-attachments/assets/89c8dfd5-d132-4fae-9c05-80718dbf0101
+https://github.com/user-attachments/assets/2693d1c6-e9ed-4e83-8e8f-fa02d7186a9e
 
 ## Основной функционал
 
