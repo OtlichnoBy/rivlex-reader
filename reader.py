@@ -19,6 +19,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
 os.environ["QT_SCALE_FACTOR"] = "1"
@@ -42,7 +43,6 @@ import torch
 from lxml import etree
 from num2words import num2words
 from scipy.io.wavfile import write as write_wav
-from scipy import signal
 from silero import silero_tts
 
 # PySide6 imports
@@ -95,7 +95,7 @@ logger = logging.getLogger(__name__)
 
 # Application metadata
 APP_NAME = "Rivlex Reader"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 AUTHOR = "OtlichnoBy"
 GITHUB_URL = "https://github.com/OtlichnoBy/rivlex-reader"
 LICENSE_INFO = "CC BY-NC-SA 4.0"
@@ -561,11 +561,11 @@ class SileroTTSThread(QThread):
     error = Signal(str)
     text_highlighted = Signal(int, int)
 
-    def __init__(self, text, speaker=1, speed=1.0, parent=None):
+    def __init__(self, text, speaker=1, speed=100, parent=None):
         super().__init__(parent)
         self.text = text
         self.speaker = speaker
-        self.speed = speed
+        self.speed = speed  # Speed percent (90-140)
         self.position_offset = 0
         self.is_running = True
         self.is_paused = False
@@ -576,6 +576,37 @@ class SileroTTSThread(QThread):
         self.next_start_pos = 0
         self.next_length = 0
         self._current_process = None  # Track external player process
+
+    def update_speed(self, speed: int):
+        """Update playback speed without recreating the thread."""
+        self.lock.lock()
+        try:
+            self.speed = speed
+        finally:
+            self.lock.unlock()
+
+    def update_speaker(self, speaker_index: int):
+        """Update speaker voice on-the-fly."""
+        self.lock.lock()
+        try:
+            self.speaker = speaker_index
+            speakers = ['aidar', 'baya', 'kseniya', 'xenia', 'eugene']
+            self.speaker_name = speakers[speaker_index] if (
+                speaker_index < len(speakers)) else 'baya'
+        finally:
+            self.lock.unlock()
+
+    def speed_to_rate(self) -> str:
+        """Map percent to SSML rate category."""
+        # Direct mapping: 80->slow, 100->medium, 120->fast, 140->x-fast
+        if self.speed < 90:
+            return "slow"
+        elif self.speed < 110:
+            return "medium"
+        elif self.speed < 130:
+            return "fast"
+        else:
+            return "x-fast"
 
     def convert_numbers_to_text(self, text):
         """Converts numbers and Roman numerals to text in Russian"""
@@ -750,37 +781,44 @@ class SileroTTSThread(QThread):
             write_wav(output_file, self.sample_rate, audio_int16)
 
             # Add offset to position
-            adjusted_start_pos = start_pos + \
-                getattr(self, 'position_offset', 0)
+            adjusted_start_pos = start_pos + getattr(
+                self, 'position_offset', 0)
             self.text_highlighted.emit(adjusted_start_pos, length)
-            # Windows - use winsound
+
+            # Windows: winsound only (external players unavailable)
             if sys.platform == 'win32':
                 try:
-                    # Play in separate thread
-                    play_thread = threading.Thread(
-                        target=lambda: winsound.PlaySound(output_file, winsound.SND_FILENAME),
-                        daemon=True
-                    )
-                    play_thread.start()
-                    self._current_process = play_thread
-                    logger.info("Запущено воспроизведение через winsound: %s", output_file)
-                    return play_thread
+                    # Use SND_ASYNC for non-blocking playback
+                    winsound.PlaySound(
+                        output_file, 
+                        winsound.SND_FILENAME | winsound.SND_ASYNC)
+                    # Store filename and start time for checking completion
+                    self._current_process = {
+                        'file': output_file,
+                        'start_time': time.time(),
+                        'duration': len(audio_int16) / self.sample_rate
+                    }
+                    logger.info(
+                        "Запущено воспроизведение через winsound: %s (%.2f сек)",
+                        output_file, self._current_process['duration'])
+                    return self._current_process
                 except Exception:
                     logger.exception("Ошибка при запуске winsound")
-            
-            # Linux/Mac - use external players
-            players = ["ffplay", "aplay", "paplay", "play", "mpv"]
+
+            # *nix: external players (tempo already in model)
+            players = ["ffplay", "mpv", "aplay", "paplay", "play"]
             for player in players:
                 try:
-                    # Add flags for ffplay
                     if player == "ffplay":
                         cmd = [
-                            player,
-                            "-nodisp",
-                            "-autoexit",
-                            "-loglevel",
-                            "quiet",
-                            output_file]
+                            player, "-nodisp", "-autoexit", "-loglevel",
+                            "quiet", output_file
+                        ]
+                    elif player == "mpv":
+                        cmd = [
+                            player, "--no-video", "--really-quiet",
+                            output_file
+                        ]
                     else:
                         cmd = [player, output_file]
 
@@ -789,25 +827,20 @@ class SileroTTSThread(QThread):
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                         start_new_session=True)
-                    # Store reference to current player process
                     self._current_process = process
                     logger.info(
                         "Запущено воспроизведение через %s: %s",
-                        player, output_file
-                    )
+                        player, output_file)
                     return process
                 except FileNotFoundError:
                     logger.warning("Плеер %s не найден", player)
                 except Exception:
                     logger.exception("Ошибка при запуске плеера %s", player)
+
             logger.error(
-                "Не удалось воспроизвести аудио: "
-                "ни один плеер не сработал"
-            )
+                "Не удалось воспроизвести аудио: ни один плеер не сработал")
             self.error.emit(
-                "Не удалось воспроизвести аудио: ни один плеер "
-                "не сработал"
-            )
+                "Не удалось воспроизвести аудио: ни один плеер не сработал")
             return None
         except Exception:
             logger.exception("Ошибка при сохранении аудио")
@@ -892,8 +925,13 @@ class SileroTTSThread(QThread):
                     continue
 
                 try:
+                    rate_category = self.speed_to_rate()
+                    ssml_text = (
+                        f"<speak><prosody rate=\"{rate_category}\">"
+                        f"{part_for_tts}</prosody></speak>"
+                    )
                     audio = self.model.apply_tts(
-                        text=part_for_tts,
+                        ssml_text=ssml_text,
                         speaker=self.speaker_name,
                         sample_rate=self.sample_rate,
                         put_accent=True,
@@ -915,16 +953,6 @@ class SileroTTSThread(QThread):
                         parts_processed / total_parts
                     )
                     continue
-
-                # Apply speed by changing audio length
-                if self.speed != 1.0:
-                    original_length = len(audio_np)
-                    new_length = int(original_length / self.speed)
-                    logger.debug(
-                        "Применяем скорость %fx: %d -> %d samples",
-                        self.speed, original_length, new_length
-                    )
-                    audio_np = signal.resample(audio_np, new_length)
 
                 if i < len(text_parts) - 1:
                     silence = np.zeros(int(self.sample_rate * 0.1))
@@ -948,8 +976,14 @@ class SileroTTSThread(QThread):
                 # Wait for playback to complete before continuing
                 try:
                     if sys.platform == 'win32':
-                        # Windows - wait for thread
-                        process.join(timeout=60)
+                        # Windows - poll completion (winsound async)
+                        start_time = process['start_time']
+                        duration = process['duration']
+                        # Poll every 0.1s until audio should be finished
+                        while time.time() - start_time < duration:
+                            if not self.is_running:
+                                break
+                            time.sleep(0.1)
                         stdout, stderr = b'', b''
                     else:
                         # Linux/Mac - wait for subprocess
@@ -1019,9 +1053,15 @@ class SileroTTSThread(QThread):
             # Try to kill external player subprocess if it's running
             if self._current_process:
                 try:
-                    if isinstance(self._current_process, threading.Thread):
-                        # Windows - thread, just wait for it to finish
-                        logger.info("Ожидание завершения winsound потока...")
+                    if isinstance(self._current_process, dict):
+                        # Windows - winsound dict, use SND_PURGE to stop
+                        logger.info("Остановка winsound воспроизведения...")
+                        if sys.platform == 'win32':
+                            try:
+                                import winsound
+                                winsound.PlaySound(None, winsound.SND_PURGE)
+                            except Exception:
+                                logger.exception("Ошибка при остановке winsound")
                         self._current_process = None
                     else:
                         # Linux/Mac - subprocess
@@ -1208,7 +1248,15 @@ class BookReaderWindow(QMainWindow):
         }}
         QComboBox::drop-down {{
             border: none;
-            width: 30px;
+            width: 0px;
+            background-color: transparent;
+            margin: 0px;
+            padding: 0px;
+        }}
+        QComboBox::down-arrow {{
+            image: none;
+            width: 0px;
+            height: 0px;
         }}
 
         QToolTip {{
@@ -1363,6 +1411,7 @@ class BookReaderWindow(QMainWindow):
         self.font_size_spinbox.setRange(12, 48)
         self.font_size_spinbox.setValue(24)
         self.font_size_spinbox.setFixedHeight(CONTROL_HEIGHT)
+        self.font_size_spinbox.setFixedWidth(58)
         self.font_size_spinbox.setFocusPolicy(Qt.ClickFocus)
         self.font_size_spinbox.valueChanged.connect(self.change_font_size)
 
@@ -1382,7 +1431,7 @@ class BookReaderWindow(QMainWindow):
             "Eugene (мужской)"
         ])
         self.voice_combo.setCurrentIndex(1)
-        self.voice_combo.setFixedWidth(230)
+        self.voice_combo.setFixedWidth(200)
         self.voice_combo.setFixedHeight(CONTROL_HEIGHT)
         self.voice_combo.setFocusPolicy(Qt.ClickFocus)
         self.voice_combo.currentIndexChanged.connect(self.on_voice_changed)
@@ -1402,21 +1451,25 @@ class BookReaderWindow(QMainWindow):
         control_panel.addLayout(font_size_layout)
         control_panel.addLayout(voice_layout)
 
-        # Playback speed (in one line)
+        # Playback speed (spinbox snapped to real SSML steps)
         speed_icon_label = QLabel()
-        speed_icon_label.setPixmap(get_icon('gauge').pixmap(ICON_SIZE_SMALL, ICON_SIZE_SMALL))
+        speed_icon_label.setPixmap(
+            get_icon('gauge').pixmap(ICON_SIZE_SMALL, ICON_SIZE_SMALL))
         speed_icon_label.setAlignment(Qt.AlignVCenter)
         speed_label = QLabel(" Скорость:")
         self.speed_spinbox = QSpinBox()
-        self.speed_spinbox.setMinimum(100)
-        self.speed_spinbox.setMaximum(130)
+        self.speed_spinbox.setRange(80, 140)
         self.speed_spinbox.setValue(100)
         self.speed_spinbox.setSuffix("%")
-        self.speed_spinbox.setSingleStep(5)
+        self.speed_spinbox.setSingleStep(20)
         self.speed_spinbox.setFixedHeight(CONTROL_HEIGHT)
+        self.speed_spinbox.setFixedWidth(88)
         self.speed_spinbox.setFocusPolicy(Qt.ClickFocus)
-        self.speed_spinbox.setToolTip("Скорость воспроизведения (100-130%)")
-        self.speed_spinbox.valueChanged.connect(self.save_current_state)
+        self.speed_spinbox.setToolTip(
+            "Скорость воспроизведения\n"
+            "Значения: 80, 100, 120, 140%"
+        )
+        self.speed_spinbox.valueChanged.connect(self.on_speed_changed)
         control_panel.addWidget(speed_icon_label, 0, Qt.AlignVCenter)
         control_panel.addWidget(speed_label, 0, Qt.AlignVCenter)
         control_panel.addWidget(self.speed_spinbox)
@@ -1598,48 +1651,7 @@ class BookReaderWindow(QMainWindow):
             # Start playback
             self.start_playback()
         else:
-            # Check if voice or speed changed
-            speaker_name = self.voice_combo.currentText()
-            silero_speakers = [
-                "Aidar (мужской)",
-                "Baya (женский)",
-                "Kseniya (женский)",
-                "Xenia (женский)",
-                "Eugene (мужской)"]
-            speaker_id = silero_speakers.index(
-                speaker_name) if speaker_name in silero_speakers else 1
-            current_speed = self.speed_spinbox.value() / 100.0
-
-            voice_changed = hasattr(
-                self.tts_thread,
-                'speaker') and self.tts_thread.speaker != speaker_id
-            speed_changed = hasattr(
-                self.tts_thread,
-                'speed') and abs(
-                self.tts_thread.speed -
-                current_speed) > 0.01
-
-            if voice_changed or speed_changed:
-                # Voice or speed changed - stop and restart
-                if voice_changed:
-                    logger.info(
-                        "Голос изменился, перезапуск с новым голосом: %s",
-                        speaker_name
-                    )
-                if speed_changed:
-                    logger.info(
-                        "Скорость изменилась: %s -> %s",
-                        self.tts_thread.speed, current_speed
-                    )
-                if self.tts_thread and self.tts_thread.isRunning():
-                    self.tts_thread.stop_playback()
-                    # Don't wait(), just reset
-                    self.cleanup_tts_thread()
-                    self.tts_thread = None
-                # Start with new parameters
-                self.start_playback()
-                return
-
+            # Simple pause/resume without automatic restart
             if self.tts_thread.is_paused:
                 # Resume
                 self.tts_thread.play_pause()
@@ -1688,8 +1700,8 @@ class BookReaderWindow(QMainWindow):
         speaker_id = silero_speakers.index(
             speaker_name) if speaker_name in silero_speakers else 1
 
-        # Get speed (100% = 1.0)
-        speed = self.speed_spinbox.value() / 100.0
+        # Get speed percent from spinbox (only 80/100/120/140 allowed)
+        speed = self.speed_spinbox.value()
 
         self.tts_thread = SileroTTSThread(
             text_to_read, speaker=speaker_id, speed=speed, parent=self)
@@ -1904,8 +1916,9 @@ class BookReaderWindow(QMainWindow):
             self.voice_combo.setCurrentIndex(voice_index)
 
         # Restore speed (default 100%)
-        speed = self.settings.get('speed', 100)
-        self.speed_spinbox.setValue(speed)
+        speed_value = self.settings.get('speed', 100)
+        if 80 <= speed_value <= 140:
+            self.speed_spinbox.setValue(speed_value)
 
         # Restore last book
         if 'last_opened_book' in self.settings:
@@ -1924,7 +1937,7 @@ class BookReaderWindow(QMainWindow):
             doc.setUseDesignMetrics(True)
             doc.setDefaultFont(self.book_text_area.font())
             self.setWindowTitle(
-                f"Rivlex Reader fb2 v.1.0.0 - {self.parser.get_title()} "
+                f"Rivlex Reader fb2 v.1.1.0 - {self.parser.get_title()} "
                 f"by {self.parser.get_author()}"
             )
             self.status_label.setText("Книга загружена")
@@ -2014,10 +2027,28 @@ class BookReaderWindow(QMainWindow):
             self.book_text_area.setFocus()
 
     def on_voice_changed(self, index):
-        """Handler for voice change"""
+        """Handler for voice change. Applies on-the-fly."""
         if hasattr(self, 'settings'):
             self.settings['voice_index'] = index
             save_settings(self.settings)
+
+        if self.tts_thread and self.tts_thread.isRunning():
+            self.tts_thread.update_speaker(index)
+            logger.info(
+                "Голос изменён на индекс %s "
+                "(применится на следующих фрагментах)",
+                index)
+
+    def on_speed_changed(self, value):
+        """Handler for speed change."""
+        self.save_current_state()
+
+        if self.tts_thread and self.tts_thread.isRunning():
+            self.tts_thread.update_speed(value)
+            logger.info(
+                "Скорость обновлена до %s%% "
+                "(применится на следующих фрагментах)",
+                value)
 
     def on_double_click_jump(self, position):
         """Handler for double click - jump to position and play"""
@@ -2033,20 +2064,15 @@ class BookReaderWindow(QMainWindow):
         self._jumping = True
 
         try:
-            # Force stop current playback
+            # Force stop current playback using centralized method
             if self.tts_thread and self.tts_thread.isRunning():
                 logger.info("Останавливаем текущий поток...")
-                self.tts_thread.stop_playback()
-
-                # Wait for thread completion with timeout
-                if not self.tts_thread.wait(2000):  # 2 секунды таймаут
-                    logger.warning("Принудительно завершаем поток...")
-                    self.tts_thread.terminate()
-                    self.tts_thread.wait()
-
-                # Force clear thread
-                self.cleanup_tts_thread()
-                self.tts_thread = None
+                # Use BookReaderWindow.stop_playback() to safely
+                # stop and cleanup the TTS thread (avoids races)
+                try:
+                    self.stop_playback()
+                except Exception:
+                    logger.exception("Ошибка при остановке потока")
 
             # Update position in settings
             self.settings['last_read_position'] = position
@@ -2242,7 +2268,7 @@ class BookReaderWindow(QMainWindow):
             <li><b>Интерактивное оглавление</b> с быстрой навигацией по главам</li>
             <li><b>Озвучивание текста</b> с использованием нейросети <a href="https://github.com/snakers4/silero-models">Silero TTS v5</a></li>
             <li><b>5 голосов:</b> Aidar (м), Baya (ж), Kseniya (ж), Xenia (ж), Eugene (м)</li>
-            <li><b>Регулировка скорости</b> от 100% до 130%</li>
+            <li><b>Регулировка скорости</b> от 80% до 140%</li>
             <li><b>Настраиваемый шрифт</b> 12-48 pt (<a href="https://brailleinstitute.org/freefont">Atkinson Hyperlegible Next</a>)</li>
             <li><b>Полнотекстовый поиск</b> с навигацией</li>
             <li><b>Автосохранение позиции</b> чтения</li>
@@ -2445,6 +2471,25 @@ class BookReaderWindow(QMainWindow):
             item = QListWidgetItem(title)
             item.setData(Qt.UserRole, position)
             toc_list.addItem(item)
+
+        # Select the chapter that contains the last saved position
+        try:
+            last_pos = int(self.settings.get('last_read_position', 0))
+            selected_row = 0
+            for i, (_t, pos) in enumerate(self.parser.toc):
+                if pos <= last_pos:
+                    selected_row = i
+                else:
+                    break
+            # Ensure selection and visibility
+            if toc_list.count() > 0:
+                toc_list.setCurrentRow(selected_row)
+                item = toc_list.item(selected_row)
+                if item:
+                    toc_list.scrollToItem(item)
+        except Exception:
+            # Fall back to default (first item) on any error
+            pass
 
         # Handle click - jump to chapter
         def on_toc_click(item):

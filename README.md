@@ -8,7 +8,7 @@
 
 ### 📺 Видеодемонстрация
 
-[<video src="docs/video.mp4" width="100%" controls></video>](https://github.com/user-attachments/assets/46cee3ea-d4eb-48cb-9027-cd8614bffb94)
+[video](docs/video.mp4)
 
 ## Основной функционал
 
@@ -16,8 +16,8 @@
 - **Интерактивное оглавление** с быстрой навигацией по главам
 - **Озвучивание текста** с использованием нейросети Silero TTS v5
 - **Выбор голоса**: Aidar (мужской), Baya, Kseniya, Xenia (женские), Eugene (мужской)
-- **Регулировка скорости чтения** от 100% до 130%
-- **Настраиваемый размер шрифта** (12-48)
+- **Регулировка скорости чтения** от 80% до 140%
+- **Настраиваемый размер шрифта** (12-48 pt)
 - **Специальный шрифт** Atkinson Hyperlegible Next для людей с нарушениями зрения
 - **Полнотекстовый поиск** с навигацией по результатам
 - **Автосохранение позиции** чтения при закрытии книги
@@ -28,11 +28,11 @@
 
 <p align="center">
   <img src="docs/screenshot.jpg" width="400" alt="Главный экран">
-  <img src="docs/screenshot4.jpg" width="400" alt="О программе и клавиши">
+  <img src="docs/screenshot4.jpg" width="400" alt="Оглавление">
 </p>
 <p align="center">
-  <img src="docs/screenshot2.jpg" width="400" alt="Оглавление">
-  <img src="docs/screenshot3.jpg" width="400" alt="Поиск по книге">
+  <img src="docs/screenshot2.jpg" width="400" alt="Поиск по книге">
+  <img src="docs/screenshot3.jpg" width="400" alt="О программе и клавиши">
 </p>
 
 ## Горячие клавиши
@@ -72,19 +72,9 @@
 - **ОС**: Windows 10+, macOS 10.14+ или Linux (Ubuntu/Debian)
 - **Python**: 3.11 или выше
 - **RAM**: минимум 2 ГБ
-- **Аудио-движок**: 
-  - **Windows**: используется системный `winsound` (не требует установки доп. ПО)
-  - **Linux/macOS**: любой установленный плеер (`ffplay`, `aplay`, `paplay`, `play` или `mpv`)
+- **Аудио-плеер**: ffplay, aplay, paplay, play или mpv
 
 ## Установка
-
-### 🚀 Windows
-
-Для пользователей Windows доступна готовая сборка, не требующая установки Python:
-
-1. Перейдите в раздел [Releases](https://github.com/OtlichnoBy/rivlex-reader/releases).
-2. Скачайте архив `RivlexReader-v1.0.0-Windows.zip`.
-3. Распакуйте в любую папку и запустите `RivlexReader.vbs`.
 
 ### Linux (Ubuntu/Debian)
 
@@ -115,6 +105,25 @@ conda activate rivlex_reader
 pip install -r requirements.txt
 ```
 
+### Windows
+
+```bash
+# 1. Установите Python 3.11+ с python.org
+# 2. Установите ffmpeg:
+#    - Скачайте с https://github.com/BtbN/FFmpeg-Builds/releases
+#    - Или используйте winget: winget install ffmpeg
+
+# 3. В PowerShell или CMD:
+git clone https://github.com/OtlichnoBy/rivlex-reader.git
+cd rivlex-reader
+
+python -m venv venv
+venv\Scripts\activate
+
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
 ### macOS
 
 ```bash
@@ -135,11 +144,15 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-## Запуск (из исходников)
+## Запуск
 
 ```bash
-# Linux / Mac
+# Linux
 source venv/bin/activate
+python reader.py
+
+# Windows
+venv\Scripts\activate
 python reader.py
 ```
 
